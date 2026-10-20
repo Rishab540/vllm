@@ -1154,7 +1154,6 @@ class QwenGatedDeltaNetAttention(GatedDeltaNetAttention):
         else:
             tokens = mixed_qkv.size(0)
             varlen_loc = cu_seqlens[: n_seq + 1]
-        out = core_attn_out[:tokens]
         launch_conv_gdn_norm(
             mixed_qkv[:tokens],
             conv_weights,
@@ -1166,11 +1165,10 @@ class QwenGatedDeltaNetAttention(GatedDeltaNetAttention):
             indices[:n_seq],
             accepted[:n_seq],
             self.kv_cache[1],
-            out,
+            core_attn_out[:tokens],
             z[:tokens],
             self.norm.weight,
             self.norm.eps,
-            out,
             gate_sigmoid=self.norm.activation == "sigmoid",
             n_seq=n_seq,
             cu_seqlens=varlen_loc,

@@ -212,7 +212,6 @@ def _run_fused(
         z,
         norm.weight,
         EPS,
-        out,
         gate_sigmoid=norm.activation == "sigmoid",
     )
 
@@ -443,7 +442,6 @@ def _compare_packed(
         z if varlen else z[:total],
         norm.weight,
         EPS,
-        fused_out if varlen else fused_out[:total],
         gate_sigmoid=False,
         n_seq=batch,
         cu_seqlens=cu_seqlens,

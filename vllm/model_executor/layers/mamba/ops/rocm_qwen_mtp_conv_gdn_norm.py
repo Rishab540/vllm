@@ -32,7 +32,6 @@ def _shift_and_norm(
     o_ptr,
     z_ptr,
     norm_w_ptr,
-    y_ptr,
     stride_x_tok,
     stride_conv_slot,
     stride_conv_dim,
@@ -40,7 +39,6 @@ def _shift_and_norm(
     stride_o_row,
     stride_z_tok,
     stride_z_head,
-    stride_y_row,
     stride_indices_batch,
     stride_accepted,
     eps,
@@ -92,9 +90,8 @@ def _shift_and_norm(
             head = row % HV
             cols = tl.arange(0, BLOCK_V)
             mask_v = cols < V
-            x = tl.load(
-                o_ptr + (tok * HV + head) * stride_o_row + cols, mask=mask_v, other=0
-            ).to(tl.float32)
+            o_row = o_ptr + (tok * HV + head) * stride_o_row + cols
+            x = tl.load(o_row, mask=mask_v, other=0).to(tl.float32)
             z = tl.load(
                 z_ptr + tok * stride_z_tok + head * stride_z_head + cols,
                 mask=mask_v,
@@ -105,11 +102,7 @@ def _shift_and_norm(
             rstd = tl.rsqrt(tl.sum(x * x) / V + eps)
             y = (x * rstd) * w
             y = y * tl.sigmoid(z) if GATE_SIGMOID else y * (z * tl.sigmoid(z))
-            tl.store(
-                y_ptr + (tok * HV + head) * stride_y_row + cols,
-                y.to(y_ptr.dtype.element_ty),
-                mask=mask_v,
-            )
+            tl.store(o_row, y.to(o_ptr.dtype.element_ty), mask=mask_v)
 
 
 def launch_conv_gdn_norm(
@@ -127,13 +120,12 @@ def launch_conv_gdn_norm(
     z,
     norm_weight,
     eps,
-    normed_out,
     gate_sigmoid: bool = False,
     n_seq: int = 1,
     cu_seqlens: torch.Tensor | None = None,
 ) -> None:
-    """``core_out``, ``z``, ``normed_out`` are ``[tokens, HV, V]``;
-    ``normed_out`` may alias ``core_out``.
+    """``core_out`` and ``z`` are ``[tokens, HV, V]``; ``core_out`` receives
+    the normed output in place.
 
     ``ssm_state`` is ``[slots, HV, V, K]``. ``mixed`` is
     ``[tokens, 2 * H * K + HV * V]``. ``indices`` is ``[n_seq, >= T]``;
@@ -229,7 +221,6 @@ def launch_conv_gdn_norm(
     )
     n_conv = triton.cdiv(dim, _CONV_BLOCK)
     o2 = core_out.view(tokens * num_v_heads, head_v)
-    y2 = normed_out.view(tokens * num_v_heads, head_v)
     _shift_and_norm[(n_conv + seq_tokens * num_v_heads, n_seq)](
         mixed,
         conv_state,
@@ -239,7 +230,6 @@ def launch_conv_gdn_norm(
         o2,
         z,
         norm_weight,
-        y2,
         mixed.stride(0),
         conv_state.stride(0),
         conv_state.stride(1),
@@ -247,7 +237,6 @@ def launch_conv_gdn_norm(
         o2.stride(0),
         z.stride(0),
         z.stride(1),
-        y2.stride(0),
         indices.stride(0),
         num_accepted.stride(0),
         eps,
